@@ -708,7 +708,7 @@ def run_tests(argv=UNITTEST_ARGS):
                 subprocess.run([sys.executable, "-m", "pip", "install", "pytest-xdist"])
             os.environ["NO_COLOR"] = "1"
             pytest_report_path = os.path.join(pytest_report_path, test_filename)
-            exit_code = pytest.main(args=[inspect.getfile(sys._getframe(1)), '-vv', '-s',
+            exit_code = pytest.main(args=[inspect.getfile(sys._getframe(1)), '-n=2', '-vv', '-s',
                                     f'--junitxml={pytest_report_path}.xml'])
             sanitize_pytest_xml(f'{pytest_report_path}.xml')
             unittest_success = unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(
@@ -1918,6 +1918,9 @@ class TestCase(expecttest.TestCase):
         else:
             super().run(result=result)
 
+        super().run(result=result)
+        print(f'\n\t{torch.cuda.memory_allocated()} {torch.cuda.max_memory_allocated()} {torch.cuda.memory_reserved()} ' +
+              f'{torch.cuda.max_memory_reserved()}', file=sys.stderr)
         # Early terminate test if necessary.
         if self._should_stop_test_suite():
             if result.wasSuccessful():
