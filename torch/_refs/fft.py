@@ -28,6 +28,12 @@ __all__ = [
     "irfftn",
     "hfftn",
     "ihfftn",
+    "fft2",
+    "ifft2",
+    "rfft2",
+    "irfft2",
+    "hfft2",
+    "ihfft2",
 ]
 
 NormType = Union[None, Literal["forward"], Literal["backward"], Literal["ortho"]]
@@ -461,3 +467,63 @@ def hfftn(
     tmp = prims.conj_physical(tmp)
     out = prims.fft_c2r(tmp, dim=dim[-1:], last_dim_size=last_dim_size)
     return _apply_norm(out, norm, last_dim_size, forward=True)
+
+
+@out_wrapper()
+def fft2(
+    input: TensorLikeType,
+    s: Optional[ShapeType] = None,
+    dim: Optional[DimsType] = (-2, -1),
+    norm: NormType = None,
+) -> TensorLikeType:
+    return torch.fft.fftn(input, s=s, dim=dim, norm=norm)
+
+
+@out_wrapper()
+def ifft2(
+    input: TensorLikeType,
+    s: Optional[ShapeType] = None,
+    dim: Optional[DimsType] = (-2, -1),
+    norm: NormType = None,
+) -> TensorLikeType:
+    return torch.fft.ifftn(input, s=s, dim=dim, norm=norm)
+
+
+@out_wrapper()
+def rfft2(
+    input: TensorLikeType,
+    s: Optional[ShapeType] = None,
+    dim: Optional[DimsType] = (-2, -1),
+    norm: NormType = None,
+) -> TensorLikeType:
+    return torch.fft.rfftn(input, s=s, dim=dim, norm=norm)
+
+
+@out_wrapper()
+def irfft2(
+    input: TensorLikeType,
+    s: Optional[ShapeType] = None,
+    dim: Optional[DimsType] = (-2, -1),
+    norm: NormType = None,
+) -> TensorLikeType:
+    return torch.fft.irfftn(input, s=s, dim=dim, norm=norm)
+
+
+@out_wrapper()
+def hfft2(
+    input: TensorLikeType,
+    s: Optional[ShapeType] = None,
+    dim: Optional[DimsType] = (-2, -1),
+    norm: NormType = None,
+) -> TensorLikeType:
+    return torch.fft.hfftn(input, s=s, dim=dim, norm=norm)
+
+
+@out_wrapper()
+def ihfft2(
+    input: TensorLikeType,
+    s: Optional[ShapeType] = None,
+    dim: Optional[DimsType] = (-2, -1),
+    norm: NormType = None,
+) -> TensorLikeType:
+    return torch.fft.ihfftn(input, s=s, dim=dim, norm=norm)
