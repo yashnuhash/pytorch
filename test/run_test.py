@@ -370,6 +370,9 @@ def run_test(
     # Can't call `python -m unittest test_*` here because it doesn't run code
     # in `if __name__ == '__main__': `. So call `python test_*.py` instead.
     argv = [test_module + ".py"] + unittest_args
+    mem_report_path = os.path.join('mem-reports', test_module)
+    os.makedirs(mem_report_path, exist_ok=True)
+    os.environ["MEM_FILE"] = f"{mem_report_path}/memory_info.log"
 
     command = ['bash', '../.github/scripts/monitor_proc.sh'] + (launcher_cmd or []) + executable + argv
     print_to_stderr("Executing {} ... [{}]".format(command, datetime.now()))

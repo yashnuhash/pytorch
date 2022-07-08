@@ -70,9 +70,9 @@ get_multi_proc_ids() {
     ps --forest -o pid --ppid "${my_pid}" --pid "${my_pid}" | awk 'NR>1 {print}'
 }
 
-LOG_FILE=${LOG_FILE:-}
-if [[ -z "${LOG_FILE}" ]]; then
-    LOG_FILE=$(mktemp --suffix "_monitor_proc")
+MEM_FILE=${MEM_FILE:-}
+if [[ -z "${MEM_FILE}" ]]; then
+    MEM_FILE=${LOG_FILE}_mem
 fi
 
 COMMAND=$@
@@ -85,10 +85,10 @@ else
     COMMAND_TO_RUN=$@
 fi
 
-echo "Running  ${COMMAND_TO_RUN} > \"${LOG_FILE}\" 2>&1 &"
-${COMMAND_TO_RUN} > "${LOG_FILE}" 2>&1 &
+echo "Running  ${COMMAND_TO_RUN} &"
+/usr/bin/time -f "\nTotal time elapsed: %e seconds." ${COMMAND_TO_RUN} &
 PID_TO_WATCH=$(ps aux |  grep -v 'grep' | grep -F "${COMMAND_TO_RUN}" | grep -v "$0" | awk '{print $2}' | head -1)
-# trap "kill -9 ${PID_TO_WATCH}" 0
+trap "kill -9 ${PID_TO_WATCH} >/dev/null 2>/dev/null || exit 0" $(seq 0 15)
 MAX_GPU_MEMORY=0
 MAX_RSS_MEMORY=0
 MAX_PSS_MEMORY=0
@@ -96,32 +96,23 @@ MAX_PSS_MEMORY=0
 echo "Watching PID: ${PID_TO_WATCH}"
 echo "Searching for spawned processes with"
 echo "Tail log file with: ps --forest -o pid --ppid ${PID_TO_WATCH} --pid ${PID_TO_WATCH} | awk 'NR>1 {print}'"
-echo "    tail -f ${LOG_FILE}"
 
 iteration=0
-if [[ "${BUILD_ENVIRONMENT}" == *cuda* ]]; then
-    echo "yes cuda"
-else
-    echo "no cuda"
-fi
-printf "\n%-15s%-15s%s\n" "Max GPU Mem." "Max RSS Mem." "Max PSS Mem."
+printf "\n%-15s%-15s%s\n" "Max GPU Mem." "Max RSS Mem." "Max PSS Mem." | tee $MEM_FILE
 while kill -0 "${PID_TO_WATCH}" >/dev/null 2>/dev/null; do
     for pid in $(get_multi_proc_ids "${PID_TO_WATCH}"); do
-        if [[ "${BUILD_ENVIRONMENT}" == *cuda* ]]; then
-            MAX_GPU_MEMORY=$("${get_gpu_max_memory_usage}" "${pid}" "${MAX_GPU_MEMORY}")
-        else
-            MAX_GPU_MEMORY=0
-        fi
+        MAX_GPU_MEMORY=$("${get_gpu_max_memory_usage}" "${pid}" "${MAX_GPU_MEMORY}")
         MAX_RSS_MEMORY=$(get_cpu_max_rss_memory_usage "${pid}" "${MAX_RSS_MEMORY}")
         MAX_PSS_MEMORY=$(get_cpu_max_pss_memory_usage "${pid}" "${MAX_PSS_MEMORY}")
     done
     # Print out max every 5 seconds
     if [[ "${iteration}" -eq "10" ]]; then
-        printf "%-15s%-15s%s\n" "${MAX_GPU_MEMORY}" "${MAX_RSS_MEMORY}" "${MAX_PSS_MEMORY}"
+        printf "%-15s%-15s%s\n" "${MAX_GPU_MEMORY}" "${MAX_RSS_MEMORY}" "${MAX_PSS_MEMORY}" | tee -a $MEM_FILE
         iteration=0
     else
         iteration=$((iteration+1))
     fi
     sleep 0.5
 done
-printf "%-15s%-15s%s\n" "${MAX_GPU_MEMORY}" "${MAX_RSS_MEMORY}" "${MAX_PSS_MEMORY}"
+
+printf "%-15s%-15s%s\n" "${MAX_GPU_MEMORY}" "${MAX_RSS_MEMORY}" "${MAX_PSS_MEMORY}" | tee -a $MEM_FILE
