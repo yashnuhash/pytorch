@@ -39,11 +39,11 @@ def enable_strict(val):
     global IS_STRICT
     IS_STRICT = val
 
-def wrap_output(inner_res, proxy_res):
+def wrap_output(inner_res, proxy_res, **kwargs):
     def wrap_with_proxy(e, proxy):
         if isinstance(e, torch.Tensor):
             with no_dispatch():
-                return ProxyTensor(e, proxy)
+                return ProxyTensor(e, proxy, **kwargs)
         else:
             return e
 
@@ -59,6 +59,13 @@ def wrap_output(inner_res, proxy_res):
     else:
         return inner_res
 
+def unwrap_proxy(e):
+    return e.proxy if isinstance(e, ProxyTensor) else e
+
+def unwrap_elem(e):
+    if isinstance(e, ProxyTensor):
+        return e.elem
+    return e
 
 def proxy_call(func_overload, args, kwargs=None):
     if kwargs is None:
@@ -67,17 +74,13 @@ def proxy_call(func_overload, args, kwargs=None):
     if func_overload in CURRENT_DECOMPOSITION_TABLE:
         return CURRENT_DECOMPOSITION_TABLE[func_overload](*args, **kwargs)
     if func_overload == aten._local_scalar_dense.default:
+        t, = args
+        assert not kwargs
+        if t.constant is not None:
+            return t.constant.item()
         raise RuntimeError("It appears that you're trying to get value out of a tracing tensor - erroring out! "
                            "It's likely that this is caused by data-dependent control flow or similar."
                            "Try torch.fx.experimental.proxy_tensor.enable_strict(False) to disable this check")
-
-    def unwrap_proxy(e):
-        return e.proxy if isinstance(e, ProxyTensor) else e
-
-    def unwrap_elem(e):
-        if isinstance(e, ProxyTensor):
-            return e.elem
-        return e
 
     proxy_args = pytree.tree_map(unwrap_proxy, args)
     proxy_kwargs = pytree.tree_map(unwrap_proxy, kwargs)
@@ -106,7 +109,7 @@ class ProxyTensor(torch.Tensor):
 
 
     @staticmethod
-    def __new__(cls, elem, proxy, *, requires_grad=None):
+    def __new__(cls, elem, proxy, *, requires_grad=None, constant=None):
         r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
             cls,
             elem.shape, dtype=elem.dtype, layout=elem.layout, device=elem.device,
@@ -115,7 +118,7 @@ class ProxyTensor(torch.Tensor):
         )
         return r
 
-    def __init__(self, elem, proxy, *, requires_grad=None):
+    def __init__(self, elem, proxy, *, requires_grad=None, constant=None):
         if elem.is_sparse:
             proxy.node.meta['tensor_meta'] = {}
         else:
@@ -125,6 +128,7 @@ class ProxyTensor(torch.Tensor):
         assert not (isinstance(elem, ProxyTensor) and elem.proxy.tracer is proxy.tracer)
         self.elem = elem
         self.proxy = proxy
+        self.constant = constant
 
     def __deepcopy__(self, memo):
         return self.clone()
@@ -191,7 +195,7 @@ def wrap_key(f, inps):
         assert (len(flat_args) == len(flat_inps))
         for idx, arg in enumerate(flat_args):
             if isinstance(flat_inps[idx], torch.Tensor):
-                with no_dispatch():
+                with no_dispatch(), torch.utils._python_dispatch.enable_torch_dispatch_mode(torch.utils._python_dispatch.BaseTorchDispatchMode(), ignore_preexisting=True):
                     flat_args[idx] = ProxyTensor(
                         flat_inps[idx],
                         arg,
@@ -216,16 +220,59 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         self.tracer = tracer
 
     def __torch_dispatch__(self, func_overload, types, args=(), kwargs=None):
+        if func_overload is torch.ops.prim.device.default:
+            import traceback
+            traceback.print_stack()
         func = func_overload.overloadpacket
         if any(tuple(isinstance(arg, ProxyTensor) for arg in pytree.tree_flatten(args)[0])):
             return proxy_call(func_overload, args, kwargs)
+        # When we trace through a torch.tensor invocation, you never actually
+        # see a torch.ops.aten.tensor call. Instead, the way this function is
+        # implemented internally is that we allocate a plain tensor (this is
+        # *guaranteed* to be a plain tensor, we disable all modes when doing
+        # so), and then call at::lift_fresh on it (to give modes a chance to do
+        # their stuff).  Furthermore, the tensor argument to lift_fresh is guaranteed
+        # to be freshly allocated, so we want lift_fresh to be a no-op (directly
+        # returning the input argument).
+        #
+        # Here is the basic problem: when we trace this sequence of executions
+        # into an FX graph, what happens to this call sequence?  Traditionally,
+        # tensor constants get interned as buffers on the FX GraphModule.  But
+        # this is dangerous.  Consider:
+        #
+        #       x = torch.tensor(1)
+        #       x.add_(2)
+        #
+        # Naively, this traces into:
+        #
+        #       t = self._tensor_constant0  # initialized to torch.tensor(1)
+        #       x = torch.ops.aten.lift_fresh(t)
+        #       x.add_(2)
+        #
+        # If lift_fresh returns t directly, the subsequent add_ call will
+        # modify the tensor constant. Really, the problem is we've violated
+        # the invariant the the argument to lift is fresh.  So what we should
+        # preserve the invariant by replacing lift_fresh with lift_fresh_copy:
+        #
+        #       t = self._tensor_constant0  # initialized to torch.tensor(1)
+        #       x = torch.ops.aten.lift_fresh_copy(t)
+        #       x.add_(2)
+        #
+        # This is what the overload modification does.
         else:
+            if func_overload is torch.ops.aten.lift_fresh.default:
+                func_overload = torch.ops.aten.lift_fresh_copy.default
+
             proxy_res = self.tracer.create_proxy('call_function', func_overload, args, kwargs,
                                                  name=self.tracer.graph._target_to_str(func.__name__))
 
             inner_res = func_overload(*args, **kwargs)
 
-            return wrap_output(inner_res, proxy_res)
+            # If this is a lift, the input tensor is guaranteed to be a
+            # constant, so we keep a copy of the original argument along so
+            # we can query it if we're asked to item() it at some later point
+            is_lift = func_overload is torch.ops.aten.lift_fresh_copy.default
+            return wrap_output(inner_res, proxy_res, constant=args[0] if is_lift else None)
 
 
 class DecompositionInterpreter(torch.fx.Interpreter):
