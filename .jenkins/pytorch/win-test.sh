@@ -2,6 +2,8 @@
 set -ex
 
 sudo apt-get install -y bc
+sudo apt-get install -y time
+
 SCRIPT_PARENT_DIR=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 # shellcheck source=./common.sh
 source "$SCRIPT_PARENT_DIR/common.sh"
