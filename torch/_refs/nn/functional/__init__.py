@@ -270,7 +270,7 @@ def hardshrink(a: TensorLikeType, lambd: float = 0.5):
     # hardshrink(x) = x if x > lambd
     #               = x if x < -lambd
     #               = 0 otherwise
-    return refs.where(abs(a) > abs(lambd), a, 0)
+    return refs.where(refs.logical_and(a >= -lambd, a <= lambd), 0, a)
 
 
 @register_decomposition(torch.ops.aten.softshrink)
@@ -280,6 +280,10 @@ def softshrink(a: TensorLikeType, lambd: float = 0.5):
     # softshrink(x) = x - lambd if x > lambd
     #               = x + lambd if x < -lambd
     #               = 0 otherwise
+    check(
+        lambd >= 0,
+        lambda: f"lambda must be greater or equal to 0, but found to be {lambd}",
+    )
     ge_mask = a > lambd
     le_mask = a < -lambd
     zero_mask = torch.logical_not(refs.logical_or(ge_mask, le_mask))
@@ -485,3 +489,13 @@ def prelu(a: TensorLikeType, weight: TensorLikeType) -> TensorLikeType:
     )
 
     return refs.where(a > 0, a, a * weight)
+
+
+def relu6(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
+    """
+    Reference implementation of torch.nn.functional.prelu
+    """
+    if inplace:
+        raise NotImplementedError
+
+    return refs.nn.functional.hardtanh(a, 0, 6)
