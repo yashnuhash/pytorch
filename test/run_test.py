@@ -372,7 +372,7 @@ def run_test(
     argv = [test_module + ".py"] + unittest_args
     mem_report_path = os.path.join('mem-reports', test_module)
     os.environ["MEM_FILE"] = f"{mem_report_path}/memory_info.log"
-    os.makedirs(os.path.join(test_directory, os.environ["MEM_FILE"]), exist_ok=True)
+    os.makedirs(os.path.join(test_directory, mem_report_path), exist_ok=True)
 
     command = ['bash', '../.github/scripts/monitor_proc.sh'] + (launcher_cmd or []) + executable + argv
     print_to_stderr("Executing {} ... [{}]".format(command, datetime.now()))
