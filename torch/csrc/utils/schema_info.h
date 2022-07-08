@@ -26,6 +26,8 @@ struct TORCH_API SchemaInfo {
 
   bool is_mutable(c10::string_view name);
 
+  bool is_non_deterministic() const;
+
   bool may_alias(
       const c10::SchemaArgument& lhs,
       const c10::SchemaArgument& rhs);
