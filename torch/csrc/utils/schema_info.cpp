@@ -59,6 +59,34 @@ bool SchemaInfo::is_mutable(c10::string_view name) {
   return is_mutable(*index);
 }
 
+bool SchemaInfo::may_alias(
+    const c10::SchemaArgument& lhs,
+    const c10::SchemaArgument& rhs) {
+  bool basic_check = schema_.may_alias(lhs, rhs);
+  if (!updated_) {
+    generateAliasMaps();
+  }
+  if (lhs.type == c10::SchemaArgType::input &&
+      rhs.type == c10::SchemaArgType::input) {
+    return input_alias_map_[lhs.index].count(rhs.index) || basic_check;
+  } else if (
+      lhs.type == c10::SchemaArgType::output &&
+      rhs.type == c10::SchemaArgType::output) {
+    for (size_t lhs_alias_input : output_alias_map_[lhs.index]) {
+      for (size_t rhs_alias_input : output_alias_map_[rhs.index]) {
+        if (lhs_alias_input == rhs_alias_input) {
+          return true;
+        }
+      }
+    }
+    return basic_check;
+  } else if (lhs.type == c10::SchemaArgType::output) {
+    return output_alias_map_[lhs.index].count(rhs.index) || basic_check;
+  } else {
+    return output_alias_map_[rhs.index].count(lhs.index) || basic_check;
+  }
+}
+
 at::IValue SchemaInfo::flattenZeroDimIValue(const at::IValue& value) const {
   if (value.isList()) {
     c10::List<at::IValue> value_list = value.toList();
@@ -73,6 +101,8 @@ void SchemaInfo::generateAliasMaps() {
   updated_ = true;
   input_alias_map_ = std::vector<std::unordered_set<size_t>>(
       schema_.arguments().size(), std::unordered_set<size_t>());
+  output_alias_map_ = std::vector<std::unordered_set<size_t>>(
+      schema_.returns().size(), std::unordered_set<size_t>());
   for (size_t i = 0; i < schema_.arguments().size(); i++) {
     for (size_t j = i; j < schema_.arguments().size(); j++) {
       if (i == j) {
@@ -85,6 +115,16 @@ void SchemaInfo::generateAliasMaps() {
           input_alias_map_[i].insert(j);
           input_alias_map_[j].insert(i);
         }
+      }
+    }
+  }
+  for (size_t i = 0; i < schema_.arguments().size(); i++) {
+    for (size_t j = 0; j < schema_.returns().size(); j++) {
+      if (schema_.may_alias(
+              {c10::SchemaArgType::input, i},
+              {c10::SchemaArgType::output, j})) {
+        output_alias_map_[j].insert(
+            input_alias_map_[i].begin(), input_alias_map_[i].end());
       }
     }
   }
