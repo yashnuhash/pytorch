@@ -17,11 +17,11 @@ get_gpu_max_memory_usage_cuda() {
     local max=$2
     local curr
     # Some processes might not use the GPU
-    if ! nvidia-smi pmon -s m -c 1 -o T | grep "${my_pid}" >/dev/null 2>/dev/null; then
+    if ! nvidia-smi --query-gpu=memory.used --format=csv | grep -o "[0-9.]*" >/dev/null 2>/dev/null; then
         echo "${max}"
         return
     fi
-    curr=$(nvidia-smi pmon -s m -c 1 -o T | grep "${my_pid}" | awk '{print $5}' | sort | tail -1 | grep -o "[0-9.]*")
+    curr=$(nvidia-smi --query-gpu=memory.used --format=csv | grep -o "[0-9.]*")
     max "${curr}" "${max}"
 }
 
@@ -101,7 +101,11 @@ iteration=0
 printf "\n%-15s%-15s%s\n" "Max GPU Mem." "Max RSS Mem." "Max PSS Mem." | tee $MEM_FILE
 while kill -0 "${PID_TO_WATCH}" >/dev/null 2>/dev/null; do
     for pid in $(get_multi_proc_ids "${PID_TO_WATCH}"); do
-        MAX_GPU_MEMORY=$("${get_gpu_max_memory_usage}" "${pid}" "${MAX_GPU_MEMORY}")
+        if [[ "${BUILD_ENVIRONMENT}" == *cuda* ]]; then
+            MAX_GPU_MEMORY=$("${get_gpu_max_memory_usage}" "${pid}" "${MAX_GPU_MEMORY}")
+        else
+            MAX_GPU_MEMORY=0
+        fi
         MAX_RSS_MEMORY=$(get_cpu_max_rss_memory_usage "${pid}" "${MAX_RSS_MEMORY}")
         MAX_PSS_MEMORY=$(get_cpu_max_pss_memory_usage "${pid}" "${MAX_PSS_MEMORY}")
     done
