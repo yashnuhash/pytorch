@@ -20,6 +20,8 @@ struct TORCH_API SchemaInfo {
   explicit SchemaInfo(const char* signature)
       : schema_(torch::jit::parseSchema(signature)), updated_(false) {}
 
+  bool has_side_effects() const;
+
   bool is_mutable();
 
   bool is_mutable(size_t index);
