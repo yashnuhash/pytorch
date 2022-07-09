@@ -4,6 +4,7 @@ from typing import Callable, Dict, List, Set, Tuple
 
 import torch.nn as nn
 from torch.fx._compatibility import compatibility
+from torch.fx.passes.infra.pass_base import PassResult
 
 @compatibility(is_backward_compatible=False)
 def inplace_wrapper(fn: Callable) -> Callable:
@@ -18,11 +19,35 @@ def inplace_wrapper(fn: Callable) -> Callable:
     Returns:
         wrapped_fn (Callable[Module, PassResult])
     """
+    if fn is None:
+        return None
 
     @wraps(fn)
     def wrapped_fn(gm):
         fn(gm)
-        return gm
+        return PassResult(gm, True)
+
+    return wrapped_fn
+
+def pass_result_wrapper(fn: Callable) -> Callable:
+    """
+    Temporary wrapper for passes which currently do not return a PassResult.
+    This wrapper makes them return a PassResult containing the modified object
+    and True for the "modified" flag.
+
+    Args:
+        fn (Callable[Module, Any])
+
+    Returns:
+        wrapped_fn (Callable[Module, PassResult])
+    """
+    if fn is None:
+        return None
+
+    @wraps(fn)
+    def wrapped_fn(gm):
+        gm = fn(gm)
+        return PassResult(gm, True)
 
     return wrapped_fn
 
@@ -143,7 +168,7 @@ class PassManager:
             after each pass
     """
 
-    passes: List[Callable[[nn.Module], nn.Module]] = []
+    passes: List[Callable[[nn.Module], PassResult]] = []
     constraints: List[Callable[[Callable, Callable], bool]] = []
     _validated: bool = False
     steps: int = 1
@@ -218,7 +243,7 @@ class PassManager:
     def check(self, module: nn.Module) -> None:
         pass
 
-    def __call__(self, module: nn.Module) -> nn.Module:
+    def __call__(self, module: nn.Module) -> PassResult:
         """
         Runs a list of passes in the order based on `self.passes` on the given
         graph module. Each time a pass is run, checks and linting will be run on
@@ -237,6 +262,7 @@ class PassManager:
 
         # Run the set of passes `steps` number of times or until the graph stops
         # changing
+        overall_modified = False
         for _ in range(self.steps):
             modified = False
 
@@ -244,15 +270,16 @@ class PassManager:
             for fn in self.passes:
                 res = fn(module)
 
-                module = res
+                module = res.graph_module
+                modified = modified or res.modified
 
                 # Check graph invariants
                 if self.run_checks_after_each_pass:
                     self.check(module)
 
-            # TODO(angelayi): If the graph no longer changes, then we can stop
-            # running these passes
+            # If the graph no longer changes, then we can stop running these passes
+            overall_modified = overall_modified or modified
             if not modified:
                 break
 
-        return module
+        return PassResult(module, overall_modified)

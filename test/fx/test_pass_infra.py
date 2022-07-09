@@ -11,16 +11,20 @@ from torch.fx.passes.infra.pass_manager import (
 )
 
 def replace_add_with_mul_pass(gm):
+    modified = False
     for node in gm.graph.nodes:
         if node.op == "call_function" and node.target == torch.add:
             node.target = torch.mul
-    return gm
+            modified = True
+    return PassResult(gm, modified)
 
 def replace_mul_with_div_pass(gm):
+    modified = False
     for node in gm.graph.nodes:
         if node.op == "call_function" and node.target == torch.mul:
             node.target = torch.div
-    return gm
+            modified = True
+    return PassResult(gm, modified)
 
 class AddModule(torch.nn.Module):
     def __init__(self):
@@ -138,7 +142,6 @@ class TestPassManager(TestCase):
             this_before_that_pass_constraint(passes[3], passes[1]),
         ]
         sorted = topological_sort_passes(passes, constraints)
-        print(sorted)
         self.assertEqual(sorted, ([pass4, pass5, pass0, pass2, pass3, pass1], False))
 
         # Circular dependency should result in the circular_dep flag being set
