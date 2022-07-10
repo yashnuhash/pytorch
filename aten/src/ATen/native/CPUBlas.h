@@ -101,6 +101,15 @@ void gemm(
     int64_t beta,
     int64_t *c, int64_t ldc);
 
+void gemm(
+    TransposeType transa, TransposeType transb,
+    int64_t m, int64_t n, int64_t k,
+    float alpha,
+    const c10::BFloat16 *a, int64_t lda,
+    const c10::BFloat16 *b, int64_t ldb,
+    float beta,
+    c10::BFloat16 *c, int64_t ldc);
+
 template <typename scalar_t>
 void gemm_batched(
     TransposeType transa, TransposeType transb,
